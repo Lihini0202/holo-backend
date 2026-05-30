@@ -21,8 +21,8 @@ COPY . .
 RUN sed -i 's/\r$//' start.sh && chmod +x start.sh
 
 # Create a non-root user (Required by Choreo security)
-RUN useradd -m choreo
-USER choreo
+RUN useradd -u 10014 -m choreo
+USER 10014
 
 # Start the app
 CMD ["./start.sh"]
