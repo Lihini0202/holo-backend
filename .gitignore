@@ -1,0 +1,25 @@
+# Environment & Secrets
+.env
+service_account.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# Flutter build artifacts (if frontend is in same repo)
+dating_risk_app/build/

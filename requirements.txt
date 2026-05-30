@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+celery
+redis
+supabase
+google-cloud-vision
+python-dotenv
+openai
+joblib
+pandas
+scikit-learn==1.2.2
+pydantic
+python-multipart
+eventlet
