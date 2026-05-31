@@ -15,16 +15,14 @@ else:
     print('REDIS_URL not set!')
 " 2>&1 || echo "Redis connection failed"
 
-# Start Celery worker in background with restart loop
-echo "Starting Celery worker..."
-while true; do
-  python -m celery -A tasks worker --pool=solo --loglevel=info 2>&1
-  echo "Worker crashed, restarting in 5s..."
-  sleep 5
-done &
-
-# Give worker time to start
-sleep 3
+# Only start Celery if REDIS_URL is set
+if [ -n "$REDIS_URL" ]; then
+  echo "Starting Celery worker..."
+  python -m celery -A tasks worker --pool=solo --loglevel=info &
+  sleep 3
+else
+  echo "WARNING: Skipping Celery worker - REDIS_URL not set"
+fi
 
 # Start FastAPI in foreground
 echo "Starting FastAPI..."

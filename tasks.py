@@ -13,7 +13,7 @@ import ssl
 load_dotenv()
 
 # REDIS URL from environment
-redis_url = os.getenv("REDIS_URL")
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 ssl_conf = {
     'ssl_cert_reqs': ssl.CERT_NONE
