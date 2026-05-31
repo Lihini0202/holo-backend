@@ -87,21 +87,62 @@ def get_risk_label(score):
 def analyze_text_metrics(chat_text: str):
     lines = [line for line in chat_text.split('\n') if line.strip()]
     msg_count = len(lines)
+    total_chars = len(chat_text) if len(chat_text) > 0 else 1
     emoji_count = sum(1 for char in chat_text if ord(char) > 10000)
-    emoji_rate = emoji_count / len(chat_text) if len(chat_text) > 0 else 0.0
-    return msg_count, emoji_rate
+    emoji_rate = emoji_count / total_chars
 
-def get_prediction(msg_count, emoji_rate):
-    if not model: return 0.75
+    avg_msg_len = total_chars / max(msg_count, 1)
+    question_count = chat_text.count('?')
+    short_replies = sum(1 for line in lines if len(line.strip()) < 10)
+    short_reply_ratio = short_replies / max(msg_count, 1)
+
+    return {
+        'msg_count': msg_count,
+        'emoji_rate': emoji_rate,
+        'avg_msg_len': avg_msg_len,
+        'question_count': question_count,
+        'short_reply_ratio': short_reply_ratio,
+    }
+
+def get_prediction(metrics):
+    if not model:
+        return 0.75
     try:
-        input_df = pd.DataFrame(columns=model_columns)
-        input_df.loc[0] = 0
-        if 'Message_Sent_Count' in input_df.columns:
-            input_df.loc[0, 'Message_Sent_Count'] = msg_count
-        if 'Emoji_Usage_Rate' in input_df.columns:
-            input_df.loc[0, 'Emoji_Usage_Rate'] = emoji_rate
-            
-        prediction = model.predict_proba(input_df)
+        msg_count = metrics['msg_count']
+        emoji_rate = metrics['emoji_rate']
+        short_reply_ratio = metrics['short_reply_ratio']
+
+        high_emoji = 1 if emoji_rate > 0.3 else 0
+        has_ghosting_history = 1 if short_reply_ratio > 0.6 and msg_count < 10 else 0
+        is_serial_ghoster = 1 if short_reply_ratio > 0.8 else 0
+        ghosting_risk = short_reply_ratio * 0.5 + (1.0 - min(msg_count / 50.0, 1.0)) * 0.5
+
+        feature_values = {
+            'Message_Sent_Count': msg_count,
+            'Emoji_Usage_Rate': emoji_rate,
+            'Bio_Length': int(metrics['avg_msg_len']),
+            'App_Usage_Time_Min': min(msg_count * 2, 120),
+            'Swipe_Right_Ratio': 0.5,
+            'Likes_Received': min(msg_count, 100),
+            'Mutual_Matches': max(int(msg_count * 0.3), 1),
+            'Profile_Pics_Count': 4,
+            'Last_Active_Hour': 14,
+            'Activity_Score': min(msg_count / 30.0, 2.0),
+            'Match_Success_Rate': 1.0 - short_reply_ratio,
+            'Messages_Per_Match': msg_count,
+            'Profile_Completeness': 0.7,
+            'Selectivity_Score': 0.5,
+            'Has_Ghosting_History': has_ghosting_history,
+            'Is_Serial_Ghoster': is_serial_ghoster,
+            'Ghosting_Risk_Score': ghosting_risk,
+            'Behavior_Consistency': 1.0 - short_reply_ratio,
+            'Popularity_Score': min(msg_count / 50.0, 1.0),
+            'High_Emoji_User': high_emoji,
+        }
+
+        input_df = pd.DataFrame([feature_values], columns=model_columns)
+        scaled = scaler.transform(input_df)
+        prediction = model.predict_proba(scaled)
         return prediction[0][1]
     except Exception as e:
         print(f"Prediction Error: {e}")
@@ -159,15 +200,12 @@ def update_ledger(partner_name, risk_score, msg_count, emoji_rate, age="0", loca
 @celery_app.task(name="analyze_text_task")
 def analyze_text_task(chat_text, partner_name, age="0", location="unknown", user_id=None):
     print(f"Processing Text for {partner_name}...")
-    
-    # Analyze
-    msg_count, emoji_rate = analyze_text_metrics(chat_text)
-    risk_score = get_prediction(msg_count, emoji_rate)
-    
-    # Update Database
-    history_msg = update_ledger(partner_name, risk_score, msg_count, emoji_rate, age, location, user_id)
-    
-    # Send Notification
+
+    metrics = analyze_text_metrics(chat_text)
+    risk_score = get_prediction(metrics)
+
+    history_msg = update_ledger(partner_name, risk_score, metrics['msg_count'], metrics['emoji_rate'], age, location, user_id)
+
     if user_id and supabase:
         try:
             supabase.table("notifications").insert({
@@ -178,12 +216,12 @@ def analyze_text_task(chat_text, partner_name, age="0", location="unknown", user
             }).execute()
         except Exception as e:
             print(f"Notification Error: {e}")
-    
+
     return {
         "risk_score": float(risk_score),
         "status_label": get_risk_label(risk_score),
         "history_alert": history_msg,
-        "extracted_data": {"messages": msg_count, "emoji_rate": round(emoji_rate, 2)}
+        "extracted_data": {"messages": metrics['msg_count'], "emoji_rate": round(metrics['emoji_rate'], 2)}
     }
 
 @celery_app.task(name="analyze_screenshot_task")
@@ -198,10 +236,10 @@ def analyze_screenshot_task(image_content, partner_name, age="0", location="unkn
             return {"error": "No text found in image"}
             
         full_text = response.text_annotations[0].description
-        msg_count, emoji_rate = analyze_text_metrics(full_text)
-        risk_score = get_prediction(msg_count, emoji_rate)
-        
-        history_msg = update_ledger(partner_name, risk_score, msg_count, emoji_rate, age, location, user_id)
+        metrics = analyze_text_metrics(full_text)
+        risk_score = get_prediction(metrics)
+
+        history_msg = update_ledger(partner_name, risk_score, metrics['msg_count'], metrics['emoji_rate'], age, location, user_id)
 
         if user_id and supabase:
             try:
@@ -213,12 +251,12 @@ def analyze_screenshot_task(image_content, partner_name, age="0", location="unkn
                 }).execute()
             except Exception as e:
                 print(f"Notification Error: {e}")
-        
+
         return {
             "risk_score": float(risk_score),
             "status_label": get_risk_label(risk_score),
             "history_alert": history_msg,
-            "extracted_data": {"messages": msg_count, "preview": full_text[:50]}
+            "extracted_data": {"messages": metrics['msg_count'], "preview": full_text[:50]}
         }
     except Exception as e:
         return {"error": str(e)}
